@@ -59,7 +59,6 @@ function startSubscriptions() {
 }
 
 // Room Management
-// Room Management
 function setupRoom() {
     const urlParams = new URLSearchParams(window.location.search);
     const room = urlParams.get('room');
@@ -160,6 +159,7 @@ async function addTodo(text) {
             completed: false,
             date: dateKey,
             room: currentRoomId,
+            important: false,
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         closeModal();
@@ -173,10 +173,25 @@ async function addRoutine() {
     if (!text) return;
     if (typeof window.db === 'undefined') return;
 
+    // Get selected days
+    const selectedDays = [];
+    document.querySelectorAll('.weekday-btn[data-day]').forEach(btn => {
+        if (btn.classList.contains('selected')) {
+            selectedDays.push(parseInt(btn.dataset.day));
+        }
+    });
+
+    if (selectedDays.length === 0) {
+        alert("최소 하루 이상의 요일을 선택해주세요.");
+        return;
+    }
+
     try {
         await window.db.collection('routines').add({
             text: text,
             room: currentRoomId,
+            days: selectedDays,
+            important: false,
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         newRoutineInput.value = '';
@@ -186,8 +201,10 @@ async function addRoutine() {
 }
 
 async function checkRoutine(routineId, text) {
-    // When a virtual routine item is checked, create a real Todo item
     const dateKey = currentDate.toISOString().split('T')[0];
+    const originalRoutine = currentRoutines.find(r => r.id === routineId);
+    const isImportant = originalRoutine ? (originalRoutine.important || false) : false;
+
     try {
         await window.db.collection('todos').add({
             text: text,
@@ -195,6 +212,7 @@ async function checkRoutine(routineId, text) {
             date: dateKey,
             room: currentRoomId,
             routineId: routineId, // Link to routine
+            important: isImportant,
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
     } catch (error) {
@@ -256,6 +274,7 @@ async function toggleImportant(collection, id, currentStatus) {
 
 function renderCombinedList() {
     todoListEl.innerHTML = '';
+    const currentDayOfWeek = currentDate.getDay();
 
     // 1. Identify done routines
     const doneRoutineIds = new Set(
@@ -269,15 +288,25 @@ function renderCombinedList() {
 
     // 2-1. Add Real Todos
     currentTodos.forEach(todo => {
+        let originalRoutineCreatedTime = 0;
+        if (todo.routineId) {
+            const r = currentRoutines.find(r => r.id === todo.routineId);
+            if (r && r.createdAt) originalRoutineCreatedTime = r.createdAt.seconds;
+        }
+
         displayList.push({
             type: 'todo',
             data: todo,
-            sortTime: todo.createdAt ? todo.createdAt.seconds : 0
+            sortTime: originalRoutineCreatedTime > 0 ? originalRoutineCreatedTime : (todo.createdAt ? todo.createdAt.seconds : 0)
         });
     });
 
-    // 2-2. Add Virtual Routines
+    // 2-2. Add Virtual Routines (Filtered by Day)
     currentRoutines.forEach(routine => {
+        if (routine.days && routine.days.length > 0) {
+            if (!routine.days.includes(currentDayOfWeek)) return;
+        }
+
         if (!doneRoutineIds.has(routine.id)) {
             displayList.push({
                 type: 'routine',
@@ -287,22 +316,24 @@ function renderCombinedList() {
         }
     });
 
-    // 3. Sort List
-    // Priority 1: Important (True > False)
-    // Priority 2: Is Routine (Routine or Todo derived from Routine > Normal Todo)
-    // Priority 3: Created Time (Oldest Top, Newest Bottom)
+    // 3. Smart Sort
     displayList.sort((a, b) => {
-        // 1. Important
+        // 1. Completion Status (Uncompleted Top)
+        const completedA = (a.type === 'todo' && a.data.completed) ? 1 : 0;
+        const completedB = (b.type === 'todo' && b.data.completed) ? 1 : 0;
+        if (completedA !== completedB) return completedA - completedB;
+
+        // 2. Important (Important Top)
         const impA = a.data.important ? 1 : 0;
         const impB = b.data.important ? 1 : 0;
-        if (impA !== impB) return impB - impA; // True first
+        if (impA !== impB) return impB - impA;
 
-        // 2. Is Routine (Virtual Routine OR Real Todo with routineId)
+        // 3. Is Routine (Routine Top)
         const isRoutineA = (a.type === 'routine' || a.data.routineId) ? 1 : 0;
         const isRoutineB = (b.type === 'routine' || b.data.routineId) ? 1 : 0;
-        if (isRoutineA !== isRoutineB) return isRoutineB - isRoutineA; // Routine first
+        if (isRoutineA !== isRoutineB) return isRoutineB - isRoutineA;
 
-        // 3. Created Time
+        // 4. Created Time (Oldest Top)
         return a.sortTime - b.sortTime;
     });
 
@@ -321,10 +352,16 @@ function renderCombinedList() {
             }
         });
 
-        // Update Progress (Exclude virtual routines from calculation? Or include?)
-        // Let's keep existing logic: Completed Real Todos / (Real Todos + Virtual Routines)
-        const nonRoutineTodos = currentTodos.filter(t => !t.routineId).length;
-        const totalCount = nonRoutineTodos + currentRoutines.length;
+        // 5. Progress Calculation
+        let effectiveRoutinesCount = 0;
+        currentRoutines.forEach(r => {
+            if (!r.days || r.days.length === 0 || r.days.includes(currentDayOfWeek)) {
+                effectiveRoutinesCount++;
+            }
+        });
+
+        const nonRoutineTodosCount = currentTodos.filter(t => !t.routineId).length;
+        const totalCount = effectiveRoutinesCount + nonRoutineTodosCount;
         const completedCount = currentTodos.filter(t => t.completed).length;
 
         const percent = totalCount === 0 ? 0 : (completedCount / totalCount) * 100;
@@ -335,14 +372,9 @@ function renderCombinedList() {
 function createTodoElement(item, isVirtualRoutine) {
     const div = document.createElement('div');
     const isImportant = item.important || false;
-
-    // Determine collection for importance toggle
-    // If virtual routine, verify it's from 'routines' collection.
-    // If real todo, 'todos' collection.
     const collection = isVirtualRoutine ? 'routines' : 'todos';
 
     if (isVirtualRoutine) {
-        // Virtual Routine Item (Unchecked)
         div.className = `todo-item routine-virtual ${isImportant ? 'important' : ''}`;
         div.innerHTML = `
             <button class="star-btn ${isImportant ? 'active' : ''}" onclick="toggleImportant('${collection}', '${item.id}', ${isImportant})">
@@ -351,10 +383,14 @@ function createTodoElement(item, isVirtualRoutine) {
             <div class="checkbox" onclick="checkRoutine('${item.id}', '${item.text}')">
                 <i class="fas fa-check"></i>
             </div>
-            <span class="todo-text">${item.text} <small style="color:var(--accent-color); margin-left:5px;">(루틴)</small></span>
+            <div class="todo-content" style="flex:1;">
+                <span class="todo-text">${item.text} <small style="color:var(--accent-color); margin-left:5px;">(루틴)</small></span>
+                <div style="font-size:0.7rem; color:var(--text-secondary); margin-top:2px;">
+                    ${formatDays(item.days)}
+                </div>
+            </div>
         `;
     } else {
-        // Real Todo Item
         div.className = `todo-item ${item.completed ? 'completed' : ''} ${isImportant ? 'important' : ''}`;
         div.innerHTML = `
             <button class="star-btn ${isImportant ? 'active' : ''}" onclick="toggleImportant('${collection}', '${item.id}', ${isImportant})">
@@ -372,13 +408,28 @@ function createTodoElement(item, isVirtualRoutine) {
     return div;
 }
 
+function formatDays(days) {
+    if (!days || days.length === 0 || days.length === 7) return '매일';
+    const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+    // Sort logic to show Mon first
+    const sortedDays = [...days].sort((a, b) => {
+        const da = a === 0 ? 7 : a;
+        const db = b === 0 ? 7 : b;
+        return da - db;
+    });
+    return sortedDays.map(d => dayNames[d]).join(', ');
+}
+
 function renderRoutineListModal() {
     routineListEl.innerHTML = '';
     currentRoutines.forEach(routine => {
         const li = document.createElement('li');
         li.className = 'routine-item';
         li.innerHTML = `
-            <span>${routine.text}</span>
+            <div style="display:flex; flex-direction:column;">
+                <span>${routine.text}</span>
+                <span style="font-size:0.7rem; color:var(--text-secondary);">${formatDays(routine.days)}</span>
+            </div>
             <button class="delete-btn" onclick="deleteRoutine('${routine.id}')" style="opacity:1; color:var(--text-secondary);">
                 <i class="fas fa-trash"></i>
             </button>
@@ -392,7 +443,6 @@ function setupEventListeners() {
     prevBtn.addEventListener('click', () => changeDate(-1));
     nextBtn.addEventListener('click', () => changeDate(1));
 
-    // Main Todo Modal
     addBtn.addEventListener('click', () => { modal.classList.add('active'); newTaskInput.focus(); });
     cancelBtn.addEventListener('click', () => { modal.classList.remove('active'); newTaskInput.value = ''; });
     saveBtn.addEventListener('click', () => {
@@ -404,7 +454,6 @@ function setupEventListeners() {
     });
     modal.addEventListener('click', (e) => { if (e.target === modal) cancelBtn.click(); });
 
-    // Routine Modal
     routineBtn.addEventListener('click', () => { routineModal.classList.add('active'); });
     closeRoutineBtn.addEventListener('click', () => { routineModal.classList.remove('active'); });
     addRoutineBtn.addEventListener('click', addRoutine);
@@ -413,7 +462,31 @@ function setupEventListeners() {
     });
     routineModal.addEventListener('click', (e) => { if (e.target === routineModal) closeRoutineBtn.click(); });
 
-    // Share Button
+    // Weekday Buttons
+    const weekdayBtns = document.querySelectorAll('.weekday-btn[data-day]');
+    weekdayBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            btn.classList.toggle('selected');
+        });
+    });
+
+    // Everyday Button
+    const everydayBtn = document.getElementById('everyday-btn');
+    if (everydayBtn) {
+        everydayBtn.addEventListener('click', () => {
+            // Select ALL
+            const allSelected = Array.from(weekdayBtns).every(btn => btn.classList.contains('selected'));
+
+            if (allSelected) {
+                // Deselect all
+                weekdayBtns.forEach(btn => btn.classList.remove('selected'));
+            } else {
+                // Select all
+                weekdayBtns.forEach(btn => btn.classList.add('selected'));
+            }
+        });
+    }
+
     const shareBtn = document.getElementById('share-btn');
     if (shareBtn) {
         shareBtn.addEventListener('click', () => {
@@ -426,7 +499,6 @@ function setupEventListeners() {
         });
     }
 
-    // Global Exposure
     window.toggleTodo = toggleTodo;
     window.deleteTodo = deleteTodo;
     window.addTodo = addTodo;
