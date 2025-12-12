@@ -59,6 +59,7 @@ function startSubscriptions() {
 }
 
 // Room Management
+// Room Management
 function setupRoom() {
     const urlParams = new URLSearchParams(window.location.search);
     const room = urlParams.get('room');
@@ -72,12 +73,12 @@ function setupRoom() {
         const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?room=' + currentRoomId;
         window.history.pushState({ path: newUrl }, '', newUrl);
     }
-}
-console.log(`Joined Room: ${currentRoomId}`);
 
-// UI 표시
-const roomDisplay = document.getElementById('room-id-display');
-if (roomDisplay) roomDisplay.textContent = currentRoomId;
+    console.log(`Joined Room: ${currentRoomId}`);
+
+    // UI 표시
+    const roomDisplay = document.getElementById('room-id-display');
+    if (roomDisplay) roomDisplay.textContent = currentRoomId;
 }
 
 function generateRoomId() {
@@ -241,69 +242,112 @@ function closeModal() {
     newTaskInput.value = '';
 }
 
+
+async function toggleImportant(collection, id, currentStatus) {
+    if (typeof window.db === 'undefined') return;
+    try {
+        await window.db.collection(collection).doc(id).update({
+            important: !currentStatus
+        });
+    } catch (error) {
+        console.error("Error toggling importance:", error);
+    }
+}
+
 function renderCombinedList() {
     todoListEl.innerHTML = '';
 
-    // 1. Mark which routines are already done today
+    // 1. Identify done routines
     const doneRoutineIds = new Set(
         currentTodos
-            .filter(t => t.routineId) // Has routineId
+            .filter(t => t.routineId)
             .map(t => t.routineId)
     );
 
-    // 2. Render Real Todos
+    // 2. Prepare Unified List
+    let displayList = [];
+
+    // 2-1. Add Real Todos
     currentTodos.forEach(todo => {
-        const el = createTodoElement(todo, false);
-        todoListEl.appendChild(el);
+        displayList.push({
+            type: 'todo',
+            data: todo,
+            sortTime: todo.createdAt ? todo.createdAt.seconds : 0
+        });
     });
 
-    // 3. Render Virtual Routines (only if not done yet)
+    // 2-2. Add Virtual Routines
     currentRoutines.forEach(routine => {
         if (!doneRoutineIds.has(routine.id)) {
-            const el = createTodoElement(routine, true);
-            todoListEl.appendChild(el);
+            displayList.push({
+                type: 'routine',
+                data: routine,
+                sortTime: routine.createdAt ? routine.createdAt.seconds : 0
+            });
         }
     });
 
-    // 4. Update Progress (count routines as total items)
-    // Total = currentTodos + visible irtual routines
-    // Completed = currentTodos.filter(completed)
-    // Actually, "Total Tasks for day" = Normal Todos + All Routines (done or not)
-    // But if we deleted a todo that originated from routine, it becomes a virtual routine again.
-    // So: Total = (Non-routine Todos) + (All Routines)
+    // 3. Sort List
+    // Priority 1: Important (True > False)
+    // Priority 2: Is Routine (Routine or Todo derived from Routine > Normal Todo)
+    // Priority 3: Created Time (Oldest Top, Newest Bottom)
+    displayList.sort((a, b) => {
+        // 1. Important
+        const impA = a.data.important ? 1 : 0;
+        const impB = b.data.important ? 1 : 0;
+        if (impA !== impB) return impB - impA; // True first
 
-    const nonRoutineTodos = currentTodos.filter(t => !t.routineId).length;
-    const totalCount = nonRoutineTodos + currentRoutines.length;
+        // 2. Is Routine (Virtual Routine OR Real Todo with routineId)
+        const isRoutineA = (a.type === 'routine' || a.data.routineId) ? 1 : 0;
+        const isRoutineB = (b.type === 'routine' || b.data.routineId) ? 1 : 0;
+        if (isRoutineA !== isRoutineB) return isRoutineB - isRoutineA; // Routine first
 
-    // Completed count
-    // Real todos completed + Any routine that has a corresponding Real Todo(completed or not? usually completed)
-    // Wait, if I uncheck a routine-todo, it stays as a Real Todo but uncompleted.
-    // So simple count of all completed Real Todos is enough?
-    // No, if I have 3 routines, and I did 1. Real Todo count=1(comp). Virtual=2. Total=3. Progress=33%. Correct.
+        // 3. Created Time
+        return a.sortTime - b.sortTime;
+    });
 
-    const completedCount = currentTodos.filter(t => t.completed).length;
-
-    if (totalCount === 0) {
-        if (currentTodos.length === 0 && currentRoutines.length === 0) {
-            emptyStateEl.style.display = 'flex';
-        } else {
-            emptyStateEl.style.display = 'none';
-        }
+    // 4. Render
+    if (displayList.length === 0) {
+        emptyStateEl.style.display = 'flex';
         progressFill.style.width = '0%';
     } else {
         emptyStateEl.style.display = 'none';
-        const percent = (completedCount / totalCount) * 100;
+
+        displayList.forEach(item => {
+            if (item.type === 'todo') {
+                todoListEl.appendChild(createTodoElement(item.data, false));
+            } else {
+                todoListEl.appendChild(createTodoElement(item.data, true));
+            }
+        });
+
+        // Update Progress (Exclude virtual routines from calculation? Or include?)
+        // Let's keep existing logic: Completed Real Todos / (Real Todos + Virtual Routines)
+        const nonRoutineTodos = currentTodos.filter(t => !t.routineId).length;
+        const totalCount = nonRoutineTodos + currentRoutines.length;
+        const completedCount = currentTodos.filter(t => t.completed).length;
+
+        const percent = totalCount === 0 ? 0 : (completedCount / totalCount) * 100;
         progressFill.style.width = `${percent}%`;
     }
 }
 
 function createTodoElement(item, isVirtualRoutine) {
     const div = document.createElement('div');
+    const isImportant = item.important || false;
+
+    // Determine collection for importance toggle
+    // If virtual routine, verify it's from 'routines' collection.
+    // If real todo, 'todos' collection.
+    const collection = isVirtualRoutine ? 'routines' : 'todos';
 
     if (isVirtualRoutine) {
         // Virtual Routine Item (Unchecked)
-        div.className = 'todo-item routine-virtual';
+        div.className = `todo-item routine-virtual ${isImportant ? 'important' : ''}`;
         div.innerHTML = `
+            <button class="star-btn ${isImportant ? 'active' : ''}" onclick="toggleImportant('${collection}', '${item.id}', ${isImportant})">
+                <i class="${isImportant ? 'fas' : 'far'} fa-star"></i>
+            </button>
             <div class="checkbox" onclick="checkRoutine('${item.id}', '${item.text}')">
                 <i class="fas fa-check"></i>
             </div>
@@ -311,8 +355,11 @@ function createTodoElement(item, isVirtualRoutine) {
         `;
     } else {
         // Real Todo Item
-        div.className = `todo-item ${item.completed ? 'completed' : ''}`;
+        div.className = `todo-item ${item.completed ? 'completed' : ''} ${isImportant ? 'important' : ''}`;
         div.innerHTML = `
+            <button class="star-btn ${isImportant ? 'active' : ''}" onclick="toggleImportant('${collection}', '${item.id}', ${isImportant})">
+                <i class="${isImportant ? 'fas' : 'far'} fa-star"></i>
+            </button>
             <div class="checkbox" onclick="toggleTodo('${item.id}', ${item.completed})">
                 <i class="fas fa-check"></i>
             </div>
@@ -385,6 +432,7 @@ function setupEventListeners() {
     window.addTodo = addTodo;
     window.checkRoutine = checkRoutine;
     window.deleteRoutine = deleteRoutine;
+    window.toggleImportant = toggleImportant;
 }
 
 // Start
