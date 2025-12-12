@@ -71,6 +71,7 @@ header {
     font-size: 1.5rem;
     font-weight: 700;
     background: linear-gradient(135deg, var(--text-primary), var(--accent-color));
+    background-clip: text;
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
 }
@@ -137,23 +138,48 @@ main {
 
 /* Todo Item */
 .todo-item {
+    position: relative;
     background: var(--surface-color);
-    border: 1px solid var(--glass-border);
+    /* This will now be on the inner content */
     border-radius: 12px;
-    padding: 16px;
     margin-bottom: 12px;
+    overflow: hidden;
+    /* Hide the slide-out button initially */
+    padding: 0;
+    /* Constraints padding to inner content */
+    border: 1px solid var(--glass-border);
+    animation: slideIn 0.3s ease-out;
+    user-select: none;
+    display: block;
+    /* It's a container now */
+}
+
+/* Spacing improvements */
+.todo-inner-content {
+    background: var(--surface-color);
+    padding: 16px;
     display: flex;
     align-items: center;
-    animation: slideIn 0.3s ease-out;
-    transition: all 0.2s;
-    user-select: none;
+    width: 100%;
+    height: 100%;
+    position: relative;
+    z-index: 2;
+    transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    gap: 12px;
+    /* Add gap between elements */
 }
 
-.todo-item.completed {
+.todo-item.completed .todo-inner-content {
     background: #151d29;
-    opacity: 0.7;
 }
 
+/* Ensure text stays visible but dimmed, routine tag included */
+/* Ensure text stays visible but dimmed, routine tag included */
+.todo-item.completed .todo-inner-content>*:not(.checkbox) {
+    opacity: 0.5;
+}
+
+/* Specific text styling for completed items */
 .todo-item.completed .todo-text {
     text-decoration: line-through;
     color: var(--text-secondary);
@@ -164,22 +190,24 @@ main {
     height: 24px;
     border: 2px solid var(--primary-color);
     border-radius: 50%;
-    margin-right: 15px;
+    margin-left: auto;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
     transition: all 0.2s;
+    background: transparent;
 }
 
 .todo-item.completed .checkbox {
-    background: var(--primary-color);
+    background: transparent;
+    border-color: var(--text-secondary);
 }
 
 .checkbox i {
-    color: white;
-    font-size: 0.8rem;
+    color: var(--primary-color);
+    font-size: 1rem;
     opacity: 0;
     transform: scale(0);
     transition: all 0.2s;
@@ -188,30 +216,38 @@ main {
 .todo-item.completed .checkbox i {
     opacity: 1;
     transform: scale(1);
+    color: var(--text-secondary);
 }
 
-.todo-text {
-    flex: 1;
-    font-size: 1rem;
-    word-break: break-word;
+
+
+.swipe-actions-right {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 70px;
+    background: var(--danger-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
 }
 
-.delete-btn {
+.swipe-delete-btn {
     background: transparent;
     border: none;
-    color: var(--text-secondary);
-    padding: 8px;
+    color: white;
+    font-weight: bold;
+    width: 100%;
+    height: 100%;
     cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.2s, color 0.2s;
+    font-size: 0.9rem;
 }
 
-.todo-item:hover .delete-btn {
-    opacity: 1;
-}
-
-.delete-btn:hover {
-    color: var(--danger-color);
+/* Remove delete-overlay styles */
+.delete-overlay {
+    display: none;
 }
 
 @keyframes slideIn {
@@ -456,13 +492,16 @@ main {
 }
 
 .routine-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 15px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
-    margin-bottom: 10px;
+    position: relative;
+    background: var(--surface-color);
+    border-radius: 12px;
+    margin-bottom: 12px;
+    overflow: hidden;
+    padding: 0;
+    border: 1px solid var(--glass-border);
+    user-select: none;
+    display: block;
+    /* acts as container for relative positioning */
 }
 
 .routine-item span {

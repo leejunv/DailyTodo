@@ -31,12 +31,15 @@ let unsubscribeRoutines = null;
 // Local Data Cache (for merging)
 let currentTodos = [];
 let currentRoutines = [];
+let sortableInstance = null;
+let sortableRoutineInstance = null;
 
 // Initialization
 function init() {
     updateDateDisplay();
     setupRoom();
     setupEventListeners();
+    setupSortable();
 
     // Check if Firebase is ready
     if (typeof window.db !== 'undefined') {
@@ -52,6 +55,75 @@ function init() {
         }, 1000);
     }
 }
+
+function setupSortable() {
+    if (sortableInstance) sortableInstance.destroy();
+    if (sortableRoutineInstance) sortableRoutineInstance.destroy();
+
+    // Main Todo List Sortable
+    sortableInstance = new Sortable(todoListEl, {
+        animation: 150,
+        handle: '.drag-handle',
+        ghostClass: 'sortable-ghost',
+        delay: 100,
+        delayOnTouchOnly: true,
+        onEnd: function (evt) {
+            saveCustomOrder();
+        }
+    });
+
+    // Routine List Modal Sortable
+    sortableRoutineInstance = new Sortable(routineListEl, {
+        animation: 150,
+        handle: '.drag-handle',
+        ghostClass: 'sortable-ghost',
+        delay: 100,
+        delayOnTouchOnly: true,
+        onEnd: function (evt) {
+            saveRoutineOrder();
+            // Refresh main list to reflect new order immediately
+            startSubscriptions();
+        }
+    });
+}
+
+function saveCustomOrder() {
+    const orderIds = [];
+    const items = todoListEl.querySelectorAll('.todo-item');
+    items.forEach(item => {
+        orderIds.push(item.getAttribute('data-id'));
+    });
+
+    const dateKey = currentDate.toISOString().split('T')[0];
+    const storageKey = `todo_order_${currentRoomId}_${dateKey}`;
+    localStorage.setItem(storageKey, JSON.stringify(orderIds));
+}
+
+function saveRoutineOrder() {
+    const orderIds = [];
+    const items = routineListEl.querySelectorAll('.routine-item');
+    items.forEach(item => {
+        orderIds.push(item.getAttribute('data-id'));
+    });
+
+    const storageKey = `routine_order_${currentRoomId}`;
+    localStorage.setItem(storageKey, JSON.stringify(orderIds));
+}
+
+function getCustomOrder() {
+    const dateKey = currentDate.toISOString().split('T')[0];
+    const storageKey = `todo_order_${currentRoomId}_${dateKey}`;
+    const stored = localStorage.getItem(storageKey);
+    return stored ? JSON.parse(stored) : null;
+}
+
+function getRoutineOrder() {
+    const storageKey = `routine_order_${currentRoomId}`;
+    const stored = localStorage.getItem(storageKey);
+    return stored ? JSON.parse(stored) : null;
+}
+
+
 
 function startSubscriptions() {
     subscribeTodos();
@@ -136,12 +208,23 @@ function subscribeRoutines() {
             snapshot.forEach(doc => {
                 currentRoutines.push({ id: doc.id, ...doc.data() });
             });
-            // Sort Routines too
+            // Sort Routines
+            const routineOrder = getRoutineOrder();
+
             currentRoutines.sort((a, b) => {
+                if (routineOrder) {
+                    const indexA = routineOrder.indexOf(a.id);
+                    const indexB = routineOrder.indexOf(b.id);
+                    if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+                    if (indexA !== -1) return -1;
+                    if (indexB !== -1) return 1;
+                }
+                // Fallback to creation time
                 const timeA = a.createdAt ? a.createdAt.seconds : Date.now() / 1000;
                 const timeB = b.createdAt ? b.createdAt.seconds : Date.now() / 1000;
                 return timeA - timeB;
             });
+
             renderRoutineListModal(); // Update Modal List
             renderCombinedList(); // Update Main List
         }, (error) => {
@@ -222,16 +305,28 @@ async function checkRoutine(routineId, text) {
 
 async function toggleTodo(id, currentStatus) {
     try {
-        await window.db.collection('todos').doc(id).update({
-            completed: !currentStatus
-        });
+        const item = currentTodos.find(t => t.id === id);
+        if (item && item.routineId && currentStatus === true) {
+            // It's a completed routine instance. 
+            // If we uncheck it, we should DELETE this instance so it reverts to being a "virtual" uncompleted routine.
+            await window.db.collection('todos').doc(id).delete();
+        } else {
+            // Normal todo or switching to complete (though switching to complete is handled by checkRoutine for virtuals, 
+            // this cases handles re-checking a normal todo or a routine instance that somehow stayed?)
+            // Actually, routine instances are created when checked. 
+            // If we uncheck, we delete. 
+            // If we check a normal todo, we update.
+            await window.db.collection('todos').doc(id).update({
+                completed: !currentStatus
+            });
+        }
     } catch (error) {
         console.error("Error toggling todo:", error);
     }
 }
 
 async function deleteTodo(id) {
-    if (!confirm('정말 삭제하시겠습니까?')) return;
+    // Direct delete without confirm (Confirm happens via overlay click)
     try {
         await window.db.collection('todos').doc(id).delete();
     } catch (error) {
@@ -240,7 +335,7 @@ async function deleteTodo(id) {
 }
 
 async function deleteRoutine(id) {
-    if (!confirm('루틴을 삭제하시겠습니까?\n(과거 기록은 유지됩니다)')) return;
+    // Direct delete without confirm
     try {
         await window.db.collection('routines').doc(id).delete();
     } catch (error) {
@@ -317,7 +412,26 @@ function renderCombinedList() {
     });
 
     // 3. Smart Sort
+    const customOrder = getCustomOrder();
+
     displayList.sort((a, b) => {
+        // 0. Use Custom Order if available
+        if (customOrder) {
+            const indexA = customOrder.indexOf(a.id);
+            const indexB = customOrder.indexOf(b.id);
+
+            // If both are in custom order, respect it
+            if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+
+            // If one is in custom order and the other is not
+            // (New items go to the bottom or top? Let's say top if no order)
+            // Actually, if user reordered, they want that specific order.
+            // New items usually appear at bottom or top.
+            // Let's put pre-ordered items first, new items after.
+            if (indexA !== -1) return -1;
+            if (indexB !== -1) return 1;
+        }
+
         // 1. Completion Status (Uncompleted Top)
         const completedA = (a.type === 'todo' && a.data.completed) ? 1 : 0;
         const completedB = (b.type === 'todo' && b.data.completed) ? 1 : 0;
@@ -328,10 +442,26 @@ function renderCombinedList() {
         const impB = b.data.important ? 1 : 0;
         if (impA !== impB) return impB - impA;
 
-        // 3. Is Routine (Routine Top)
-        const isRoutineA = (a.type === 'routine' || a.data.routineId) ? 1 : 0;
-        const isRoutineB = (b.type === 'routine' || b.data.routineId) ? 1 : 0;
-        if (isRoutineA !== isRoutineB) return isRoutineB - isRoutineA;
+        // 3. Is Routine (Routine Top) -> Sort by Routine Order
+        // Use the order from currentRoutines array which is already sorted by getRoutineOrder
+        const getRoutineIndex = (item) => {
+            const rId = (item.type === 'routine') ? item.data.id : item.data.routineId;
+            if (!rId) return 9999;
+            const idx = currentRoutines.findIndex(r => r.id === rId);
+            return idx === -1 ? 9999 : idx;
+        };
+
+        const routineIndexA = getRoutineIndex(a);
+        const routineIndexB = getRoutineIndex(b);
+
+        // If both are routines (or linked), sort by routine order
+        if (routineIndexA !== 9999 && routineIndexB !== 9999) {
+            return routineIndexA - routineIndexB;
+        }
+
+        // If one is routine and other is not
+        if (routineIndexA !== 9999) return -1;
+        if (routineIndexB !== 9999) return 1;
 
         // 4. Created Time (Oldest Top)
         return a.sortTime - b.sortTime;
@@ -374,42 +504,151 @@ function createTodoElement(item, isVirtualRoutine) {
     const isImportant = item.important || false;
     const collection = isVirtualRoutine ? 'routines' : 'todos';
 
-    if (isVirtualRoutine) {
-        // Virtual Routine Item (Unchecked)
-        div.className = `todo-item routine-virtual ${isImportant ? 'important' : ''}`;
-        div.innerHTML = `
-            <button class="star-btn ${isImportant ? 'active' : ''}" onclick="toggleImportant('${collection}', '${item.id}', ${isImportant})">
-                <i class="${isImportant ? 'fas' : 'far'} fa-star"></i>
+    // Set ID for Sortable
+    div.setAttribute('data-id', item.id);
+    div.setAttribute('data-collection', collection);
+    div.className = `todo-item ${!isVirtualRoutine && item.completed ? 'completed' : ''} ${isImportant ? 'important' : ''}`;
+
+    // Common Elements
+    const dragHandle = `<div class="drag-handle"><i class="fas fa-grip-vertical"></i></div>`;
+    const starBtn = `
+        <button class="star-btn ${isImportant ? 'active' : ''}" onclick="toggleImportant('${collection}', '${item.id}', ${isImportant})">
+            <i class="${isImportant ? 'fas' : 'far'} fa-star"></i>
+        </button>
+    `;
+
+    // Only non-routines get swipe-to-delete in main list
+    const swipeActions = !isVirtualRoutine ? `
+        <div class="swipe-actions-right">
+            <button class="swipe-delete-btn" onclick="deleteTodo('${item.id}')">
+                <i class="fas fa-trash-alt"></i>
             </button>
-            <div class="checkbox" onclick="checkRoutine('${item.id}', '${item.text}')">
-                <i class="fas fa-check"></i>
-            </div>
-            <div class="todo-content" style="flex:1;">
-                <span class="todo-text">${item.text} <small style="color:var(--accent-color); margin-left:5px;">(루틴)</small></span>
-                <div style="font-size:0.7rem; color:var(--text-secondary); margin-top:2px;">
-                    ${formatDays(item.days)}
+        </div>
+    ` : '';
+
+    const contentInner = isVirtualRoutine ? `
+            <div class="todo-inner-content">
+                ${dragHandle}
+                ${starBtn}
+                <div class="todo-content" style="flex:1;">
+                    <span class="todo-text">${item.text} <small style="color:var(--accent-color); margin-left:5px;">(루틴)</small></span>
+                    <div style="font-size:0.7rem; color:var(--text-secondary); margin-top:2px;">
+                        ${formatDays(item.days)}
+                    </div>
+                </div>
+                <div class="checkbox" onclick="checkRoutine('${item.id}', '${item.text}')">
+                    <i class="fas fa-check"></i>
                 </div>
             </div>
-        `;
-    } else {
-        // Real Todo Item
-        const routineLabel = item.routineId ? ' <small style="color:var(--accent-color); margin-left:5px;">(루틴)</small>' : '';
-
-        div.className = `todo-item ${item.completed ? 'completed' : ''} ${isImportant ? 'important' : ''}`;
-        div.innerHTML = `
-            <button class="star-btn ${isImportant ? 'active' : ''}" onclick="toggleImportant('${collection}', '${item.id}', ${isImportant})">
-                <i class="${isImportant ? 'fas' : 'far'} fa-star"></i>
-            </button>
-            <div class="checkbox" onclick="toggleTodo('${item.id}', ${item.completed})">
-                <i class="fas fa-check"></i>
+    ` : `
+            ${swipeActions}
+            <div class="todo-inner-content">
+                ${dragHandle}
+                ${starBtn}
+                <span class="todo-text">${item.text}</span>
+                <div class="checkbox" onclick="toggleTodo('${item.id}', ${item.completed})">
+                    <i class="fas fa-check"></i>
+                </div>
             </div>
-            <span class="todo-text">${item.text}${routineLabel}</span>
-            <button class="delete-btn" onclick="deleteTodo('${item.id}')">
-                <i class="fas fa-trash"></i>
-            </button>
-        `;
+    `;
+
+    div.innerHTML = contentInner;
+
+    // Swipe Logic (Only for real todos)
+    if (!isVirtualRoutine) {
+        attachSwipeListeners(div);
     }
+
     return div;
+}
+
+// Reusable Swipe Logic
+function attachSwipeListeners(element) {
+    let startX = 0;
+    let currentX = 0;
+    let isSwiping = false;
+    const innerContent = element.querySelector('.todo-inner-content');
+    if (!innerContent) return;
+
+    // Common Handlers
+    const handleStart = (clientX) => {
+        startX = clientX;
+        isSwiping = true;
+        currentX = 0;
+        innerContent.style.transition = 'none';
+    };
+
+    const handleMove = (clientX) => {
+        if (!isSwiping) return;
+        const diff = clientX - startX;
+
+        // Limit drag: Only left (negative) up to -100px
+        if (diff < 0 && diff > -100) {
+            innerContent.style.transform = `translateX(${diff}px)`;
+            currentX = diff;
+        } else if (diff > 0 && innerContent.classList.contains('swiped')) {
+            // Allow closing
+            innerContent.style.transform = `translateX(${-70 + diff}px)`;
+        }
+    };
+
+    const handleEnd = () => {
+        if (!isSwiping) return;
+        isSwiping = false;
+        innerContent.style.transition = 'transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1)';
+
+        if (currentX < -40) {
+            innerContent.style.transform = `translateX(-70px)`;
+            innerContent.classList.add('swiped');
+
+            // Close other swiped items
+            document.querySelectorAll('.todo-inner-content.swiped').forEach(el => {
+                if (el !== innerContent) {
+                    el.style.transform = 'translateX(0)';
+                    el.classList.remove('swiped');
+                }
+            });
+        } else {
+            innerContent.style.transform = 'translateX(0)';
+            innerContent.classList.remove('swiped');
+        }
+    };
+
+    // Touch Listeners
+    element.addEventListener('touchstart', (e) => {
+        if (e.target.closest('.checkbox') || e.target.closest('.star-btn') || e.target.closest('.drag-handle') || e.target.closest('.swipe-delete-btn')) return;
+        handleStart(e.touches[0].clientX);
+    }, { passive: true });
+
+    element.addEventListener('touchmove', (e) => {
+        handleMove(e.touches[0].clientX);
+    }, { passive: true });
+
+    element.addEventListener('touchend', (e) => {
+        handleEnd();
+    });
+
+    // Mouse Listeners
+    element.addEventListener('mousedown', (e) => {
+        if (e.target.closest('.checkbox') || e.target.closest('.star-btn') || e.target.closest('.drag-handle') || e.target.closest('.swipe-delete-btn')) return;
+        handleStart(e.clientX);
+    });
+
+    element.addEventListener('mousemove', (e) => {
+        if (e.buttons !== 1) {
+            isSwiping = false;
+            return;
+        }
+        handleMove(e.clientX);
+    });
+
+    element.addEventListener('mouseup', (e) => {
+        handleEnd();
+    });
+
+    element.addEventListener('mouseleave', () => {
+        if (isSwiping) handleEnd();
+    });
 }
 
 function formatDays(days) {
@@ -429,15 +668,29 @@ function renderRoutineListModal() {
     currentRoutines.forEach(routine => {
         const li = document.createElement('li');
         li.className = 'routine-item';
-        li.innerHTML = `
-            <div style="display:flex; flex-direction:column;">
-                <span>${routine.text}</span>
-                <span style="font-size:0.7rem; color:var(--text-secondary);">${formatDays(routine.days)}</span>
+        // Add data-id for sortable
+        li.setAttribute('data-id', routine.id);
+
+        const swipeActions = `
+            <div class="swipe-actions-right">
+                <button class="swipe-delete-btn" onclick="deleteRoutine('${routine.id}')">
+                    <i class="fas fa-trash-alt"></i>
+                </button>
             </div>
-            <button class="delete-btn" onclick="deleteRoutine('${routine.id}')" style="opacity:1; color:var(--text-secondary);">
-                <i class="fas fa-trash"></i>
-            </button>
         `;
+
+        li.innerHTML = `
+            ${swipeActions}
+            <div class="todo-inner-content">
+                <div class="drag-handle"><i class="fas fa-grip-vertical"></i></div>
+                <div style="flex:1; display:flex; flex-direction:column; justify-content:center;">
+                    <span class="todo-text">${routine.text}</span>
+                    <span style="font-size:0.7rem; color:var(--text-secondary); margin-top:2px;">${formatDays(routine.days)}</span>
+                </div>
+            </div>
+        `;
+
+        attachSwipeListeners(li);
         routineListEl.appendChild(li);
     });
 }
@@ -509,6 +762,13 @@ function setupEventListeners() {
     window.checkRoutine = checkRoutine;
     window.deleteRoutine = deleteRoutine;
     window.toggleImportant = toggleImportant;
+
+    // Global listener to close overlays when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.todo-item')) {
+            document.querySelectorAll('.delete-overlay.active').forEach(el => el.classList.remove('active'));
+        }
+    });
 }
 
 // Start
