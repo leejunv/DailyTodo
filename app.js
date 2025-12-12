@@ -72,7 +72,12 @@ function setupRoom() {
         const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + '?room=' + currentRoomId;
         window.history.pushState({ path: newUrl }, '', newUrl);
     }
-    console.log(`Joined Room: ${currentRoomId}`);
+}
+console.log(`Joined Room: ${currentRoomId}`);
+
+// UI 표시
+const roomDisplay = document.getElementById('room-id-display');
+if (roomDisplay) roomDisplay.textContent = currentRoomId;
 }
 
 function generateRoomId() {
@@ -108,10 +113,11 @@ function subscribeTodos() {
             snapshot.forEach(doc => {
                 currentTodos.push({ id: doc.id, ...doc.data() });
             });
-            // Sort by created time
+            // Sort by created time (Oldest Top, Newest Bottom)
             currentTodos.sort((a, b) => {
-                if (!a.createdAt || !b.createdAt) return 0;
-                return a.createdAt.seconds - b.createdAt.seconds;
+                const timeA = a.createdAt ? a.createdAt.seconds : Date.now() / 1000;
+                const timeB = b.createdAt ? b.createdAt.seconds : Date.now() / 1000;
+                return timeA - timeB;
             });
             renderCombinedList();
         }, (error) => {
@@ -129,6 +135,12 @@ function subscribeRoutines() {
             currentRoutines = [];
             snapshot.forEach(doc => {
                 currentRoutines.push({ id: doc.id, ...doc.data() });
+            });
+            // Sort Routines too
+            currentRoutines.sort((a, b) => {
+                const timeA = a.createdAt ? a.createdAt.seconds : Date.now() / 1000;
+                const timeB = b.createdAt ? b.createdAt.seconds : Date.now() / 1000;
+                return timeA - timeB;
             });
             renderRoutineListModal(); // Update Modal List
             renderCombinedList(); // Update Main List
