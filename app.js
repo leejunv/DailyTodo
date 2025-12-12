@@ -27,6 +27,8 @@ let currentDate = new Date();
 let currentRoomId = null;
 let unsubscribeTodos = null;
 let unsubscribeRoutines = null;
+let editingId = null; // Track which item is being edited
+let isEditingRoutine = false; // Track valid editing mode
 
 // Local Data Cache (for merging)
 let currentTodos = [];
@@ -245,6 +247,7 @@ async function addTodo(text) {
             important: false,
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
+        resetModals();
         closeModal();
     } catch (error) {
         alert("저장 에러: " + error.message);
@@ -277,7 +280,7 @@ async function addRoutine() {
             important: false,
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
-        newRoutineInput.value = '';
+        resetModals();
     } catch (error) {
         alert("루틴 추가 에러: " + error.message);
     }
@@ -554,6 +557,20 @@ function createTodoElement(item, isVirtualRoutine) {
 
     div.innerHTML = contentInner;
 
+    // Click text to edit
+    const textSpan = div.querySelector('.todo-text');
+    if (textSpan) {
+        textSpan.style.cursor = 'pointer';
+        textSpan.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (isVirtualRoutine) {
+                openEditRoutineModal(item.id);
+            } else {
+                openEditTodoModal(item.id);
+            }
+        });
+    }
+
     // Swipe Logic (Only for real todos)
     if (!isVirtualRoutine) {
         attachSwipeListeners(div);
@@ -683,16 +700,97 @@ function renderRoutineListModal() {
             ${swipeActions}
             <div class="todo-inner-content">
                 <div class="drag-handle"><i class="fas fa-grip-vertical"></i></div>
-                <div style="flex:1; display:flex; flex-direction:column; justify-content:center;">
+                <div class="todo-list-text" style="flex:1; display:flex; flex-direction:column; justify-content:center; cursor:pointer;">
                     <span class="todo-text">${routine.text}</span>
                     <span style="font-size:0.7rem; color:var(--text-secondary); margin-top:2px;">${formatDays(routine.days)}</span>
                 </div>
             </div>
         `;
 
+        li.querySelector('.todo-list-text').addEventListener('click', (e) => {
+            e.stopPropagation();
+            openEditRoutineModal(routine.id);
+        });
+
         attachSwipeListeners(li);
         routineListEl.appendChild(li);
     });
+}
+
+function openEditTodoModal(id) {
+    const todo = currentTodos.find(t => t.id === id);
+    if (!todo) return;
+
+    editingId = id;
+    isEditingRoutine = false;
+    newTaskInput.value = todo.text;
+    saveBtn.textContent = "수정";
+    modal.classList.add('active');
+    newTaskInput.focus();
+}
+
+function openEditRoutineModal(id) {
+    const routine = currentRoutines.find(r => r.id === id);
+    if (!routine) return;
+
+    editingId = id;
+    isEditingRoutine = true;
+    newRoutineInput.value = routine.text;
+    addRoutineBtn.textContent = "수정";
+
+    // Set Days
+    const days = routine.days || [];
+    document.querySelectorAll('.weekday-btn[data-day]').forEach(btn => {
+        const day = parseInt(btn.dataset.day);
+        if (days.includes(day)) {
+            btn.classList.add('selected');
+        } else {
+            btn.classList.remove('selected');
+        }
+    });
+
+    routineModal.classList.add('active');
+    newRoutineInput.focus();
+}
+
+async function updateTodo(id, text) {
+    try {
+        await window.db.collection('todos').doc(id).update({
+            text: text,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        closeModal();
+    } catch (error) {
+        console.error("Error updating todo:", error);
+        alert("수정 실패: " + error.message);
+    }
+}
+
+async function updateRoutine(id, text, days) {
+    try {
+        await window.db.collection('routines').doc(id).update({
+            text: text,
+            days: days,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        // Reset Inputs handled by closeRoutineModal or manually here if needed
+        newRoutineInput.value = '';
+        addRoutineBtn.textContent = '추가';
+        editingId = null;
+    } catch (error) {
+        console.error("Error updating routine:", error);
+        alert("루틴 수정 실패: " + error.message);
+    }
+}
+
+function resetModals() {
+    editingId = null;
+    isEditingRoutine = false;
+    newTaskInput.value = '';
+    newRoutineInput.value = '';
+    saveBtn.textContent = '저장';
+    addRoutineBtn.textContent = '추가';
+    document.querySelectorAll('.weekday-btn').forEach(btn => btn.classList.remove('selected'));
 }
 
 // Event Listeners
@@ -700,20 +798,59 @@ function setupEventListeners() {
     prevBtn.addEventListener('click', () => changeDate(-1));
     nextBtn.addEventListener('click', () => changeDate(1));
 
-    addBtn.addEventListener('click', () => { modal.classList.add('active'); newTaskInput.focus(); });
-    cancelBtn.addEventListener('click', () => { modal.classList.remove('active'); newTaskInput.value = ''; });
+    addBtn.addEventListener('click', () => {
+        resetModals();
+        modal.classList.add('active');
+        newTaskInput.focus();
+    });
+    cancelBtn.addEventListener('click', () => {
+        resetModals();
+        modal.classList.remove('active');
+    });
     saveBtn.addEventListener('click', () => {
         const text = newTaskInput.value.trim();
-        if (text) addTodo(text);
+        if (!text) return;
+
+        if (editingId && !isEditingRoutine) {
+            updateTodo(editingId, text);
+        } else {
+            addTodo(text);
+        }
     });
     newTaskInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') saveBtn.click();
     });
     modal.addEventListener('click', (e) => { if (e.target === modal) cancelBtn.click(); });
 
-    routineBtn.addEventListener('click', () => { routineModal.classList.add('active'); });
-    closeRoutineBtn.addEventListener('click', () => { routineModal.classList.remove('active'); });
-    addRoutineBtn.addEventListener('click', addRoutine);
+    routineBtn.addEventListener('click', () => {
+        resetModals();
+        routineModal.classList.add('active');
+    });
+    closeRoutineBtn.addEventListener('click', () => {
+        resetModals();
+        routineModal.classList.remove('active');
+    });
+    addRoutineBtn.addEventListener('click', () => {
+        if (editingId && isEditingRoutine) {
+            // Update Logic
+            const text = newRoutineInput.value.trim();
+            if (!text) return;
+
+            const selectedDays = [];
+            document.querySelectorAll('.weekday-btn[data-day]').forEach(btn => {
+                if (btn.classList.contains('selected')) {
+                    selectedDays.push(parseInt(btn.dataset.day));
+                }
+            });
+            if (selectedDays.length === 0) {
+                alert("최소 하루 이상의 요일을 선택해주세요.");
+                return;
+            }
+            updateRoutine(editingId, text, selectedDays);
+        } else {
+            addRoutine();
+        }
+    });
     newRoutineInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') addRoutine();
     });
