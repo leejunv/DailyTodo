@@ -375,6 +375,7 @@ function createTodoElement(item, isVirtualRoutine) {
     const collection = isVirtualRoutine ? 'routines' : 'todos';
 
     if (isVirtualRoutine) {
+        // Virtual Routine Item (Unchecked)
         div.className = `todo-item routine-virtual ${isImportant ? 'important' : ''}`;
         div.innerHTML = `
             <button class="star-btn ${isImportant ? 'active' : ''}" onclick="toggleImportant('${collection}', '${item.id}', ${isImportant})">
@@ -391,6 +392,9 @@ function createTodoElement(item, isVirtualRoutine) {
             </div>
         `;
     } else {
+        // Real Todo Item
+        const routineLabel = item.routineId ? ' <small style="color:var(--accent-color); margin-left:5px;">(루틴)</small>' : '';
+
         div.className = `todo-item ${item.completed ? 'completed' : ''} ${isImportant ? 'important' : ''}`;
         div.innerHTML = `
             <button class="star-btn ${isImportant ? 'active' : ''}" onclick="toggleImportant('${collection}', '${item.id}', ${isImportant})">
@@ -399,7 +403,7 @@ function createTodoElement(item, isVirtualRoutine) {
             <div class="checkbox" onclick="toggleTodo('${item.id}', ${item.completed})">
                 <i class="fas fa-check"></i>
             </div>
-            <span class="todo-text">${item.text}</span>
+            <span class="todo-text">${item.text}${routineLabel}</span>
             <button class="delete-btn" onclick="deleteTodo('${item.id}')">
                 <i class="fas fa-trash"></i>
             </button>
