@@ -54,11 +54,13 @@ header {
     border-bottom: 1px solid var(--glass-border);
 }
 
-.date-nav {
+.calendar-nav {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 15px;
+    padding: 0 20px;
+    /* 양옆 여백 추가 */
 }
 
 .date-display {
