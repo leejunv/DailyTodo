@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Daily Todo</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap"
+        rel="stylesheet">
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <header>
+            <div class="date-nav">
+                <button id="prev-date" class="nav-btn"><i class="fas fa-chevron-left"></i></button>
+                <div class="date-display">
+                    <h1 id="current-date">12월 12일</h1>
+                    <span id="current-day">목요일</span>
+                </div>
+                <button id="next-date" class="nav-btn"><i class="fas fa-chevron-right"></i></button>
+            </div>
+            <div class="header-actions">
+                <button id="share-btn" class="icon-btn" style="margin-right: 5px;"><i class="fas fa-share-alt"></i>
+                    공유하기</button>
+                <button id="routine-btn" class="icon-btn"><i class="fas fa-cog"></i> 루틴 관리</button>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+        </header>
+
+        <main id="todo-list">
+            <!-- Todo Items will be inserted here -->
+            <div class="empty-state" id="empty-state" style="display: none;">
+                <i class="fas fa-check-circle"></i>
+                <p>오늘 할 일이 없어요!</p>
+            </div>
+        </main>
+
+        <div class="floating-input-area">
+            <button id="add-btn" class="fab"><i class="fas fa-plus"></i></button>
+        </div>
+
+        <!-- Add Task Modal -->
+        <div id="add-modal" class="modal">
+            <div class="modal-content">
+                <h2>새로운 할 일</h2>
+                <input type="text" id="new-task-input" placeholder="무엇을 해야 하나요?" autocomplete="off">
+                <div class="modal-actions">
+                    <button id="cancel-btn" class="secondary-btn">취소</button>
+                    <button id="save-btn" class="primary-btn">추가</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Routine Management Modal -->
+        <div id="routine-modal" class="modal">
+            <div class="modal-content full-height">
+                <div class="modal-header">
+                    <h2>매일 루틴 관리</h2>
+                    <button id="close-routine-btn" class="close-icon"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="routine-input-area">
+                    <input type="text" id="new-routine-input" placeholder="매일 자동 생성될 할 일 입력" autocomplete="off">
+                    <button id="add-routine-btn" class="primary-btn small">추가</button>
+                </div>
+                <ul id="routine-list" class="routine-list">
+                    <!-- Routine Items will be here -->
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK (Compat) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+    <!-- Config & App -->
+    <script src="firebase-config.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>
