@@ -489,7 +489,8 @@ main {
     list-style: none;
     overflow-y: auto;
     max-height: calc(80vh - 120px);
-    padding-bottom: 50px; /* Ensure last item is visible */
+    padding-bottom: 100px;
+    /* Increased to ensure last item is fully visible */
 }
 
 .routine-item {
