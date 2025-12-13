@@ -520,8 +520,11 @@ function createTodoElement(item, isVirtualRoutine) {
         </button>
     `;
 
-    // Only non-routines get swipe-to-delete in main list
-    const swipeActions = !isVirtualRoutine ? `
+    // Only non-routines (and non-completed routine instances) get swipe-to-delete in main list
+    // If it has routineId, it's a completed routine instance. User wants these LOCKED (no delete).
+    const canSwipe = !isVirtualRoutine && !item.routineId;
+
+    const swipeActions = canSwipe ? `
         <div class="swipe-actions-right">
             <button class="swipe-delete-btn" onclick="deleteTodo('${item.id}')">
                 <i class="fas fa-trash-alt"></i>
@@ -571,8 +574,8 @@ function createTodoElement(item, isVirtualRoutine) {
         });
     }
 
-    // Swipe Logic (Only for real todos)
-    if (!isVirtualRoutine) {
+    // Swipe Logic (Only for real todos, NOT completed routine instances)
+    if (canSwipe) {
         attachSwipeListeners(div);
     }
 
