@@ -22,6 +22,14 @@ const newRoutineInput = document.getElementById('new-routine-input');
 const addRoutineBtn = document.getElementById('add-routine-btn');
 const routineListEl = document.getElementById('routine-list');
 
+// Helper: Get local YYYY-MM-DD date key
+function getLocalDateKey(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
 // Data State
 let currentDate = new Date();
 let currentRoomId = null;
@@ -96,7 +104,7 @@ function saveCustomOrder() {
         orderIds.push(item.getAttribute('data-id'));
     });
 
-    const dateKey = currentDate.toISOString().split('T')[0];
+    const dateKey = getLocalDateKey(currentDate);
     const storageKey = `todo_order_${currentRoomId}_${dateKey}`;
     localStorage.setItem(storageKey, JSON.stringify(orderIds));
 }
@@ -113,7 +121,7 @@ function saveRoutineOrder() {
 }
 
 function getCustomOrder() {
-    const dateKey = currentDate.toISOString().split('T')[0];
+    const dateKey = getLocalDateKey(currentDate);
     const storageKey = `todo_order_${currentRoomId}_${dateKey}`;
     const stored = localStorage.getItem(storageKey);
     return stored ? JSON.parse(stored) : null;
@@ -177,7 +185,7 @@ function changeDate(days) {
 function subscribeTodos() {
     if (unsubscribeTodos) unsubscribeTodos();
 
-    const dateKey = currentDate.toISOString().split('T')[0];
+    const dateKey = getLocalDateKey(currentDate);
 
     unsubscribeTodos = window.db.collection('todos')
         .where('room', '==', currentRoomId)
@@ -237,7 +245,7 @@ function subscribeRoutines() {
 // Logic: Add/Delete Todo & Routine
 async function addTodo(text) {
     if (typeof window.db === 'undefined') return;
-    const dateKey = currentDate.toISOString().split('T')[0];
+    const dateKey = getLocalDateKey(currentDate);
     try {
         await window.db.collection('todos').add({
             text: text,
@@ -287,7 +295,7 @@ async function addRoutine() {
 }
 
 async function checkRoutine(routineId, text) {
-    const dateKey = currentDate.toISOString().split('T')[0];
+    const dateKey = getLocalDateKey(currentDate);
     const originalRoutine = currentRoutines.find(r => r.id === routineId);
     const isImportant = originalRoutine ? (originalRoutine.important || false) : false;
 
